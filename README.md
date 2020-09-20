@@ -27,11 +27,11 @@ Proxied tcp/http flood need some time to block.
 You can change the setting below:
 ```
 	// You can edit this
-	waf_port         = "0.0.0.0:80"     //your waf address
-	real_port        = "localhost:1337" //your real address
-	pps_per_ip_limit = 50               //Limit the packets per second of ip
-	connection_limit = 10               //Limit the connections of ip
-	banned_time      = 60               //Blocking time of the banned ip
+	waf_port                 = "0.0.0.0:80"     //your waf address
+	real_port                = "localhost:1337" //your real address
+	pps_per_ip_limit         = 10               //Limit the packets per second of ip
+	connection_limit         = 10               //Limit the connections of ip
+	banned_time      float64 = 60               //Blocking time of the banned ip
 ```
 
 ## TODO
