@@ -41,7 +41,7 @@ You can change the setting below:
 - [ ] Block injection 
 - [ ] Filter the sensitive url
 
-### Experiment
+## Experiment
 
 Tested with 1400+ socks4 proxies, it takes some time to block all the ips.
 
