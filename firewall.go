@@ -20,10 +20,9 @@ var (
 	// You can edit this
 	waf_port         = "0.0.0.0:80"     //your waf address
 	real_port        = "localhost:1337" //your real address
-	pps_per_ip_limit = 50               //packets per second per ip limitation
-	connection_limit = 10               //Limit the connections of one ip
-	banned_time      = 60
-
+	pps_per_ip_limit = 50               //Limit the packets per second of ip
+	connection_limit = 10               //Limit the connections of ip
+	banned_time      = 60               //Blocking time of the banned ip
 	//You better know what are this
 	connection_per_ip sync.Map //changed to sync.Map because map is unsafe
 	rps_per_ip        sync.Map //changed to sync.Map because map is unsafe
