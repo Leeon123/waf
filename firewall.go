@@ -11,12 +11,13 @@ import (
 )
 
 var (
-	waf_port         = "0.0.0.0:80"     //your waf address
-	real_port        = "localhost:1337" //your real address
-	rps_per_ip_limit = 100              //requests per second per ip limitation
-	banned_list      []string
-	static_list      = map[string]int{}
-	static_lock      = sync.RWMutex{}
+	waf_port          = "0.0.0.0:80"     //your waf address
+	real_port         = "localhost:1337" //your real address
+	rps_per_ip_limit  = 50               //requests per second per ip limitation
+	connection_limit  = 10               //Limit the connections of one ip
+	connection_per_ip sync.Map           //changed to sync.Map because map is unsafe
+	rps_per_ip        sync.Map           //changed to sync.Map because map is unsafe
+	banned_list       []string           //
 )
 
 func main() {
@@ -33,7 +34,18 @@ func main() {
 			fmt.Println("Accept Error:", err)
 			continue
 		}
-		go handle(conn)
+		remoteIP := strings.Split(conn.RemoteAddr().String(), ":")[0] //Get the Ip
+		connections, ok := connection_per_ip.Load(remoteIP)
+		if ok {
+			if connections.(int) >= connection_limit {
+				conn.Close()
+			}
+			connection_per_ip.Store(remoteIP, connections.(int)+1)
+		} else {
+			connection_per_ip.Store(remoteIP, 1)
+		}
+
+		go handle(conn, remoteIP)
 	}
 }
 
@@ -46,27 +58,32 @@ func unban() {
 
 func monitor() {
 	for {
-		static_lock.Lock()
-		for ip, times := range static_list {
-			if times >= rps_per_ip_limit { //limit the rps
-				banned_list = append(banned_list, ip)
+		rps_per_ip.Range(func(ip, times interface{}) bool {
+			if times.(int) >= rps_per_ip_limit { //limit the rps
+				banned_list = append(banned_list, ip.(string))
 			}
-			delete(static_list, ip) //clear it every second
-		}
-		static_lock.Unlock()
+			rps_per_ip.Delete(ip.(string))
+			return true
+		})
 		time.Sleep(time.Second)
 	}
 }
 
-func handle(src net.Conn) {
-	remoteIP := strings.Split(src.RemoteAddr().String(), ":")[0] //Get the Ip
+func handle(src net.Conn, remoteIP string) {
 	defer src.Close()
+	defer func() {
+		connections, ok := connection_per_ip.Load(remoteIP)
+		if ok && connections.(int) > 0 {
+			connection_per_ip.Store(remoteIP, connections.(int)-1)
+		}
+	}()
 	if src, ok := src.(*net.TCPConn); ok {
 		src.SetNoDelay(false)
 	}
 	var dst net.Conn
 	requestsPerConnection := 0
 	for {
+
 		src.SetDeadline(time.Now().Add(10 * time.Second))
 		for _, v := range banned_list {
 			if v == remoteIP {
@@ -84,7 +101,7 @@ func handle(src net.Conn) {
 			}
 			return
 		}
-		request := buf[:n]
+		request := buf[:n] //TODO, check the request's
 		if dst == nil {
 			//fmt.Println("Started a connection to real server")
 			dst, err = net.DialTimeout("tcp", real_port, time.Second*10)
@@ -104,12 +121,14 @@ func handle(src net.Conn) {
 		}
 		dst.SetDeadline(time.Now().Add(10 * time.Second))
 		dst.Write(request)
-		src.SetDeadline(time.Now().Add(10 * time.Second))
 		//fmt.Println(request)// we can filter request later, such as some injection or exploit...
 		requestsPerConnection++
-		static_lock.Lock()
-		static_list[remoteIP]++
-		static_lock.Unlock()
+		rps, ok := rps_per_ip.Load(remoteIP)
+		if ok {
+			rps_per_ip.Store(remoteIP, rps.(int)+1)
+		} else {
+			rps_per_ip.Store(remoteIP, 1)
+		}
 	}
 }
 
