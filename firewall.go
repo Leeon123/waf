@@ -1,3 +1,9 @@
+/*
+Coded by Leeon123
+Date: 2020/9/20 18:01
+It is not only for http server,
+also for other tcp server.
+*/
 package main
 
 import (
@@ -11,13 +17,18 @@ import (
 )
 
 var (
-	waf_port          = "0.0.0.0:80"     //your waf address
-	real_port         = "localhost:1337" //your real address
-	rps_per_ip_limit  = 50               //requests per second per ip limitation
-	connection_limit  = 10               //Limit the connections of one ip
-	connection_per_ip sync.Map           //changed to sync.Map because map is unsafe
-	rps_per_ip        sync.Map           //changed to sync.Map because map is unsafe
-	banned_list       []string           //
+	// You can edit this
+	waf_port         = "0.0.0.0:80"     //your waf address
+	real_port        = "localhost:1337" //your real address
+	pps_per_ip_limit = 50               //packets per second per ip limitation
+	connection_limit = 10               //Limit the connections of one ip
+	banned_time      = 60
+
+	//You better know what are this
+	connection_per_ip sync.Map //changed to sync.Map because map is unsafe
+	rps_per_ip        sync.Map //changed to sync.Map because map is unsafe
+	banned_list       sync.Map //changed to sync.Map for new method
+
 )
 
 func main() {
@@ -51,16 +62,21 @@ func main() {
 
 func unban() {
 	for {
-		time.Sleep(time.Second * 30) //clear banned list every 30 second, might be will change the logic later
-		banned_list = nil
+		banned_list.Range(func(ip, time_banned interface{}) bool {
+			if used := time_banned.(time.Time); used.Second() > banned_time {
+				banned_list.Delete(ip.(string))
+			}
+			return true
+		})
+		time.Sleep(time.Second) //check every second
 	}
 }
 
 func monitor() {
 	for {
 		rps_per_ip.Range(func(ip, times interface{}) bool {
-			if times.(int) >= rps_per_ip_limit { //limit the rps
-				banned_list = append(banned_list, ip.(string))
+			if times.(int) >= pps_per_ip_limit { //limit the pps
+				banned_list.Store(ip.(string), time.Now())
 			}
 			rps_per_ip.Delete(ip.(string))
 			return true
@@ -82,13 +98,19 @@ func handle(src net.Conn, remoteIP string) {
 	}
 	var dst net.Conn
 	requestsPerConnection := 0
+	banned := false
 	for {
 
 		src.SetDeadline(time.Now().Add(10 * time.Second))
-		for _, v := range banned_list {
-			if v == remoteIP {
-				return
+		banned_list.Range(func(ip, _ interface{}) bool {
+			if ip == remoteIP {
+				banned = true
+				return false
 			}
+			return true
+		})
+		if banned {
+			return
 		}
 		if requestsPerConnection >= 100 {
 			return
@@ -101,12 +123,12 @@ func handle(src net.Conn, remoteIP string) {
 			}
 			return
 		}
-		request := buf[:n] //TODO, check the request's
+		request := buf[:n] //TODO, check the request.
 		if dst == nil {
 			//fmt.Println("Started a connection to real server")
 			dst, err = net.DialTimeout("tcp", real_port, time.Second*10)
 			if err != nil {
-				src.Write([]byte("HTTP/1.1 503 service unavailable\r\n\r\n"))
+				//src.Write([]byte("HTTP/1.1 503 service unavailable\r\n\r\n"))
 				return
 			}
 			if dst, ok := dst.(*net.TCPConn); ok {
