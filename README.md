@@ -1,9 +1,24 @@
 # waf
 Simple golang tcp reverse proxy with filter
 
+## Function
+- **Anti-cc**
+  - Limit the connections per ip
+  - Limit the requests per connection
+  - Limit the requests per second of every ip
+- **Block IP system**
+  - Auto block ip trigger the limitation
+  - Unblock all ip every 30 second(might be change)
+- **Check validity of request**
+  - Unfinished
+- **Block injection**
+  - Unfinished
+- **Filter the sensitive url**
+  - Unfinished
+
 ## TODO
 - [x] Anti-cc
-- [x] Ban IP system
+- [x] Block IP system
 - [ ] Check validity of request
 - [ ] Block injection 
 - [ ] Filter the sensitive url
