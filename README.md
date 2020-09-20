@@ -41,7 +41,7 @@ You can change the setting below:
 - [ ] Block injection 
 - [ ] Filter the sensitive url
 
-## Experiment
+### Experiment
 
 Tested with 1400+ socks4 proxies, it takes some time to block all the ips.
 
@@ -51,4 +51,5 @@ Tested with 1400+ socks4 proxies, it takes some time to block all the ips.
 
 **Server side** (2c2g) using apache2 http server
 
-![](https://i.imgur.com/pvnFLB7.png)
+![](https://i.imgur.com/zR6fd3b.png)
+
