@@ -1,6 +1,10 @@
 # waf
 Simple golang tcp reverse proxy with filter
 
+Since added the limitation of connection per ip,
+
+it could easily block the non-proxies tcp/http flood.
+
 ## Function
 - **Anti-cc**
   - Limit the connections per ip
