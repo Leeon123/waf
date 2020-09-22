@@ -11,6 +11,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,13 +26,17 @@ var (
 	pps_per_ip_limit         = 10               //Limit the packets per second of ip
 	connection_limit         = 10               //Limit the connections of ip
 	banned_time      float64 = 60               //Blocking time of the banned ip
+
 	//You better know what are this
 	connection_per_ip sync.Map //changed to sync.Map because map is unsafe
 	rps_per_ip        sync.Map //changed to sync.Map because map is unsafe
 	banned_list       sync.Map //changed to sync.Map for new method
 
 	connMap sync.Map //for counting connection
-	errMsg  = "HTTP/1.1 503 service unavailable\r\nContent-Length:0\r\n\r\n"
+	errMsg  = "HTTP/1.1 503 service unavailable\r\n\r\n"
+
+	access_log_chan = make(chan string)
+	banned_log_chan = make(chan string)
 )
 
 func main() {
@@ -39,6 +45,8 @@ func main() {
 	if err != nil {
 		panic("connection error:" + err.Error())
 	}
+	go access_log()
+	go banned_log()
 	go unban()
 	go monitor()
 	for {
@@ -56,6 +64,7 @@ func main() {
 		if ok {
 			if connections.(int) >= connection_limit {
 				banned_list.Store(remoteIP, time.Now())
+				banned_log_chan <- remoteIP + " [" + time.Now().Format("2006-01-02 15:04:05") + "] Banned due to connection limit"
 				conn.Close()
 				continue
 			}
@@ -64,7 +73,30 @@ func main() {
 			connection_per_ip.Store(remoteIP, 1)
 		}
 		connMap.Store(conn.RemoteAddr().String(), conn) //might be used in soon...
+		access_log_chan <- remoteIP + " [" + time.Now().Format("2006-01-02 15:04:05") + "] Connected"
 		go handle(conn, remoteIP)
+	}
+}
+
+func access_log() {
+	file, err := os.OpenFile("access.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("Error message: %s\n", err)
+		os.Exit(1)
+	}
+	for v := range access_log_chan { //It will stop after close the channel
+		file.Write(str2bytes(v + "\n"))
+	}
+}
+
+func banned_log() {
+	file, err := os.OpenFile("banned.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("Error message: %s\n", err)
+		os.Exit(1)
+	}
+	for v := range banned_log_chan { //It will stop after close the channel
+		file.Write(str2bytes(v + "\n"))
 	}
 }
 
@@ -77,7 +109,7 @@ func unban() {
 			}
 			return true
 		})
-		time.Sleep(time.Second * 1) //check every 5 second
+		time.Sleep(time.Second * 1) //check every 1 second
 	}
 }
 
@@ -90,6 +122,7 @@ func monitor() {
 			rps++
 			if times.(int) >= pps_per_ip_limit { //limit the pps
 				banned_list.Store(ip.(string), time.Now())
+				banned_log_chan <- ip.(string) + " [" + time.Now().Format("2006-01-02 15:04:05") + "] Banned due to pps limit"
 			}
 			rps_per_ip.Delete(ip.(string))
 			return true
@@ -102,9 +135,9 @@ func monitor() {
 			bannedIP++
 			return true
 		})
-		fmt.Printf("\rConnections: %d || Banned IP: %d || Rps: %d  ", currentConn, bannedIP, rps)
-		os.Stdout.Sync()
+		fmt.Printf("Connections: %d \nBanned IP: %d \nRps: %d \n", currentConn, bannedIP, rps)
 		time.Sleep(time.Second)
+		clearScreen()
 	}
 }
 
@@ -119,6 +152,35 @@ func isBanned(remoteIP string) bool {
 	})
 	return banned
 }
+
+/*
+func readhttp(src net.Conn) (string, bool) { //More function under developing
+	buf := make([]byte, 8192) //i think you won't send a packet over 65535 bits right....?
+	payload := ""
+	for {
+		n, err := src.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				return "", false
+			}
+			break
+		}
+
+			TODO:
+			Need to check post header
+			because the post data is after the \r\n\r\n
+
+		if n > 0 {
+			payload += bytes2str(buf[:n])
+			if len(payload) > 4 {
+				if payload[len(payload)-4:] == "\r\n\r\n" { //2 crlf, end of the http request
+					break
+				}
+			}
+		}
+	}
+	return payload, true
+}*/
 
 func handle(src net.Conn, remoteIP string) {
 	defer src.Close()
@@ -152,9 +214,17 @@ func handle(src net.Conn, remoteIP string) {
 			if dst != nil {
 				dst.Close()
 			}
-			return //if there are errors, just close it.
+			return
 		}
-		request := buf[:n] //TODO, check the request.
+		request := buf[:n]
+		/*
+			request, ok := readhttp(src)
+			if !ok {
+				if dst != nil {
+					dst.Close()
+				}
+				return
+			}*/
 		if dst == nil {
 			//fmt.Println("Started a connection to real server")
 			dst, err = net.DialTimeout("tcp", real_port, time.Second*10)
@@ -174,6 +244,7 @@ func handle(src net.Conn, remoteIP string) {
 		}
 		dst.SetDeadline(time.Now().Add(10 * time.Second)) //10 second timeout
 		dst.Write(request)
+		//dst.Write(str2bytes(request))
 		//fmt.Println(request)// we can filter request later, such as some injection or exploit...
 		requestsPerConnection++
 		rps, ok := rps_per_ip.Load(remoteIP)
@@ -183,6 +254,17 @@ func handle(src net.Conn, remoteIP string) {
 			rps_per_ip.Store(remoteIP, 1)
 		}
 	}
+}
+
+func clearScreen() {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", "cls")
+	} else {
+		cmd = exec.Command("clear")
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Run()
 }
 
 func str2bytes(s string) []byte {
